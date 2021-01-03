@@ -1,0 +1,10 @@
+# Fails logs
+output {
+  if "fails" in [tags] {
+    elasticsearch {
+      hosts => {{ logstash_elasticsearch_hosts | to_json }}
+      manage_template => false
+      index => "fails-%{+YYYY.MM.dd}"
+    }
+  }
+}

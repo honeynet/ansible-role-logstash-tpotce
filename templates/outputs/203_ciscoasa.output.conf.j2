@@ -1,0 +1,10 @@
+# Ciscoasa logs
+output {
+  if "Ciscoasa" in [tags] and "fails" not in [tags] {
+    elasticsearch {
+      hosts => {{ logstash_elasticsearch_hosts | to_json }}
+      manage_template => false
+      index => "ciscoasa-%{+YYYY.MM.dd}"
+    }
+  }
+}

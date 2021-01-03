@@ -1,0 +1,10 @@
+# Tanner logs
+output {
+  if "Tanner" in [tags] and "fails" not in [tags] {
+    elasticsearch {
+      hosts => {{ logstash_elasticsearch_hosts | to_json }}
+      manage_template => false
+      index => "tanner-%{+YYYY.MM.dd}"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+# Honeytrap logs
+output {
+  if "Honeytrap" in [tags] and "fails" not in [tags] {
+    elasticsearch {
+      hosts => {{ logstash_elasticsearch_hosts | to_json }}
+      manage_template => false
+      index => "honeytrap-%{+YYYY.MM.dd}"
+    }
+  }
+}
