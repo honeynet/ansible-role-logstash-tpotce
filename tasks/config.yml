@@ -29,23 +29,22 @@
   with_fileglob:
     - ../templates/outputs/*.j2
   notify: restart logstash
-  
-- name: Git clone dtag-dev-sec/listbot repo
-  git:
-    repo: https://github.com/dtag-dev-sec/listbot
-    dest: /etc/listbot
-    depth: 1
-  notify: restart logstash
 
-- name: Download updated Geo ASN
+- name: Make listbot directory.
+  file:
+    path: /etc/listbot
+    state: directory
+
+- name: Download listbot data.
   get_url:
-    url: http://geolite.maxmind.com/download/geoip/database/GeoLite2-ASN.tar.gz
-    dest: /tmp/GeoLite2-ASN.tar.gz
+    url: "{{ item }}"
+    dest: /etc/listbot
+  with_items:
+    - https://listbot.sicherheitstacho.eu/cve.yaml.bz2
+    - https://listbot.sicherheitstacho.eu/iprep.yaml.bz2
 
-- name: Extract Geo ASN
-  unarchive:
-    src: /tmp/GeoLite2-ASN.tar.gz
-    dest: /usr/share/logstash/vendor/bundle/jruby/2.5.0/gems/logstash-filter-geoip-6.0.3-java/vendor/
-    remote_src: yes
-    extra_opts: [ --strip-components=1 ]
+- name: Extract listbot data.
+  shell: "bunzip2 -f *.bz2"
+  args:
+    chdir: /etc/listbot
   notify: restart logstash
