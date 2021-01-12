@@ -4,7 +4,7 @@ output {
     elasticsearch {
       hosts => {{ logstash_elasticsearch_hosts | to_json }}
       manage_template => false
-      index => "p0f-%{+YYYY.MM.dd}"
+      index => "logstash-p0f-%{+YYYY.MM.dd}"
     }
   }
 }
