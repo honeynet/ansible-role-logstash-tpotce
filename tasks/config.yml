@@ -21,13 +21,21 @@
 
 - name: Create Logstash output.
   template:
-    src:  "{{ item }}"
-    dest: /etc/logstash/conf.d/{{ item | basename | regex_replace('\.j2$', '') }}
+    src:  outputs/tpot.output.conf.j2
+    dest: /etc/logstash/conf.d/{{ item.id }}_{{ item.name }}.output.conf
     owner: root
     group: root
     mode: 0644
-  with_fileglob:
-    - ../templates/outputs/*.j2
+  with_items: "{{ index_list }}"
+  notify: restart logstash
+
+- name: Create ES index template.
+  copy:
+    src: es-templates/tpot_es_template.json
+    dest: /etc/logstash/tpot_es_template.json
+    owner: root
+    group: root
+    mode: 0644
   notify: restart logstash
 
 - name: Make listbot directory.
@@ -38,13 +46,33 @@
 - name: Download listbot data.
   get_url:
     url: "{{ item }}"
-    dest: /etc/listbot
+    dest: /tmp
   with_items:
     - https://listbot.sicherheitstacho.eu/cve.yaml.bz2
     - https://listbot.sicherheitstacho.eu/iprep.yaml.bz2
+  changed_when: false
 
 - name: Extract listbot data.
   shell: "bunzip2 -f *.bz2"
   args:
-    chdir: /etc/listbot
+    chdir: /tmp
+  changed_when: false
+
+- name: Copy listbot data.
+  copy:
+    src: /tmp/{{ item }}
+    dest: /etc/listbot
+    remote_src: yes
+  with_items:
+    - cve.yaml
+    - iprep.yaml
   notify: restart logstash
+
+- name: Cleanup listbot data in /tmp.
+  file:
+    path: /tmp/{{ item }}
+    state: absent
+  with_items:
+    - cve.yaml
+    - iprep.yaml
+  changed_when: false
