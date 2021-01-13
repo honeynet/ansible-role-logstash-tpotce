@@ -1,0 +1,10 @@
+# {{ item.name }} logs
+output {
+  if "{{ item.name }}" in [tags] and "fails" not in [tags] {
+    elasticsearch {
+      hosts => {{ logstash_elasticsearch_hosts | to_json }}
+      index => "logstash-{{ item.name }}-%{+YYYY.MM.dd}"
+      template => "/etc/logstash/tpot_es_template.json"
+    }
+  }
+}

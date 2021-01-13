@@ -1,0 +1,43 @@
+index_list:
+  - name: suricata
+    id: 200
+  - name: p0f
+    id: 201
+  - name: ciscoasa
+    id: 203
+  - name: adbhoney
+    id: 202
+  - name: conpot
+    id: 204
+  - name: cowrie
+    id: 205
+  - name: dionaea
+    id: 206
+  - name: elasticpot
+    id: 207
+  - name: glutton
+    id: 208 
+  - name: heralding
+    id: 209 
+  - name: mailoney
+    id: 210
+  - name: medpot
+    id: 211
+  - name: rdpy
+    id: 212
+  - name: tanner
+    id: 213
+  - name: honeypy
+    id: 214
+  - name: fatt
+    id: 215
+  - name: honeytrap
+    id: 216
+  - name: citrixhoneypot
+    id: 217
+  - name: dicompot
+    id: 218
+  - name: honeysap
+    id: 219
+  - name: ipphoney
+    id: 220
