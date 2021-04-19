@@ -4,12 +4,12 @@ filter {
     geoip {
       cache_size => 10000
       source => "src_ip"
-      database => "/usr/share/logstash/vendor/bundle/jruby/2.5.0/gems/logstash-filter-geoip-6.0.5-java/vendor/GeoLite2-City.mmdb"
+      database => "{{ GeoLite2_City_location }}"
     }
     geoip {
       cache_size => 10000
       source => "src_ip"
-      database => "/usr/share/logstash/vendor/bundle/jruby/2.5.0/gems/logstash-filter-geoip-6.0.5-java/vendor/GeoLite2-ASN.mmdb"
+      database => "{{ GeoLite2_ASN_location }}"
     }
     translate {
       refresh_interval => 86400

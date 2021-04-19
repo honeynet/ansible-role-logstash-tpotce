@@ -19,6 +19,36 @@
     mode: 0644
   notify: restart logstash
 
+- name: Find Logstah GeoLite2-City DB
+  find:
+    paths: "/usr/share/logstash/vendor/bundle/jruby/"
+    file_type: "file"
+    patterns: "GeoLite2-City.mmdb"
+    recurse: yes
+  register: find_GeoLite2_City_location
+
+- name: Find Logstah GeoLite2-ASN DB
+  find:
+    paths: "/usr/share/logstash/vendor/bundle/jruby/"
+    file_type: "file"
+    patterns: "GeoLite2-ASN.mmdb"
+    recurse: yes
+  register: find_GeoLite2_ASN_location
+
+- name: Set fact for GeoIP DB locations
+  set_fact:
+    GeoLite2_City_location: "{{ find_GeoLite2_City_location.files[0].path }}"
+    GeoLite2_ASN_location: "{{ find_GeoLite2_ASN_location.files[0].path }}"
+
+- name: Create GeoIP filter.
+  template:
+    src:  filters/198_geoipenrich.filter.conf.j2
+    dest: /etc/logstash/conf.d/198_geoipenrich.filter.conf
+    owner: root
+    group: root
+    mode: 0644
+  notify: restart logstash
+
 - name: Create Logstash output.
   template:
     src:  outputs/tpot.output.conf.j2
