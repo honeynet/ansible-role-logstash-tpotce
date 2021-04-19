@@ -17,10 +17,36 @@
     state: present
     update_cache: true
 
-- name: Install Logstash.
+# - name: Install Logstash.
+#   apt:
+#     name: "{{ logstash_package }}"
+#     state: present
+
+- name: Debian - Get installed Logstash version
+  command: dpkg-query --showformat='${Version}' --show {{ logstash_package }}
+  register: installed_logstash_version
+  failed_when: False
+  changed_when: False
+  check_mode: no
+
+- name: Debian - unhold Logstash version
+  dpkg_selections:
+    name: "{{ logstash_package }}"
+    selection: "install"
+  when: not es_version_lock or (installed_logstash_version.stdout and installed_logstash_version.stdout != logstash_package_version)
+
+- name: Debian - Ensure Logstash is installed
   apt:
-    name: logstash
+    name: '{{ logstash_package }}{% if es_version is defined and es_version != "" %}={{ logstash_package_version }}{% endif %}'
     state: present
+    cache_valid_time: 86400
+  notify: restart logstash
+
+- name: Debian - hold Logstash version
+  dpkg_selections:
+    name: "{{ logstash_package }}"
+    selection: "hold"
+  when: es_version_lock
 
 - name: Add Logstash user to adm group (Debian).
   user:
