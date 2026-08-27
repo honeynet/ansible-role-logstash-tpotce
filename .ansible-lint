@@ -14,5 +14,8 @@ skip_list:
   # conflict.
   - fqcn[action-core]
   - no-free-form
-  - name[casing]
   - yaml[octal-values]
+  # handlers/main.yml keeps upstream's lowercase task-name style even though
+  # the module call itself has been modernized (ansible.builtin.systemd
+  # instead of the free-form service:). See README.md's Provenance section.
+  - name[casing]
