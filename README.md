@@ -9,13 +9,21 @@ This role is a fork with two upstreams, and syncs should be taken from both:
 
 | Part | Upstream | Synced at |
 | --- | --- | --- |
-| Role scaffolding (`handlers/`, `tasks/ssl.yml`, `tasks/plugins.yml`) | [geerlingguy/ansible-role-logstash](https://github.com/geerlingguy/ansible-role-logstash) | `c8aaeb69` |
+| `tasks/ssl.yml`, `tasks/plugins.yml` (verbatim) | [geerlingguy/ansible-role-logstash](https://github.com/geerlingguy/ansible-role-logstash) | `c8aaeb69` |
+| `handlers/main.yml` (adapted) | [geerlingguy/ansible-role-logstash](https://github.com/geerlingguy/ansible-role-logstash) | `c8aaeb69` |
 | Pipeline configuration (`files/filters/`, `templates/outputs/`) | [telekom-security/tpotce](https://github.com/telekom-security/tpotce), `docker/elk/logstash/dist/` | `8a228130` |
 
-Files taken verbatim from geerlingguy are left formatted as upstream has them
-(short-form module calls, unqualified names) so that the next sync stays a clean
-diff. The repository `.ansible-lint` skips the rules that would otherwise
-object.
+`tasks/ssl.yml` and `tasks/plugins.yml` are left formatted exactly as upstream
+has them (short-form module calls, unqualified names) so that the next sync
+stays a clean diff. The repository `.ansible-lint` skips the rules that would
+otherwise object. `.github/workflows/upstream-sync.yml` diffs both files
+against upstream weekly and opens a PR that applies the change directly, since
+they're meant to track upstream byte-for-byte.
+
+`handlers/main.yml` is not verbatim — it uses `ansible.builtin.systemd` with
+`daemon_reload: true` in place of upstream's free-form `service:` module. The
+same workflow diffs it against upstream too, but only ever reports the change
+in the PR body; it never overwrites the file.
 
 ## How this diverges from T-Pot
 
