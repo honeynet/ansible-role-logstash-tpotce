@@ -38,6 +38,7 @@ jobs:
 
   molecule:
     name: Molecule
+    needs: lint
     runs-on: ubuntu-latest
     steps:
       - name: Check out the codebase.
