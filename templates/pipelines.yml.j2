@@ -1,0 +1,4 @@
+{{ ansible_managed | comment }}
+- pipeline.id: main
+  path.config: "{{ logstash_pipeline_dir }}/*.conf"
+  pipeline.ecs_compatibility: {{ logstash_ecs_compatibility }}

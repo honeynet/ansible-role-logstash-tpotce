@@ -3,21 +3,69 @@
   hosts: all
   become: true
 
+  # Empty on a normal machine; inherited by the role's apt, get_url and
+  # logstash-plugin tasks when running behind a proxy.
+  environment:
+    http_proxy: "{{ lookup('ansible.builtin.env', 'http_proxy') }}"
+    https_proxy: "{{ lookup('ansible.builtin.env', 'https_proxy') }}"
+    no_proxy: "{{ lookup('ansible.builtin.env', 'no_proxy') }}"
+
   vars:
-    logstash_enabled_on_boot: false
+    molecule_pki_dir: "{{ lookup('ansible.builtin.env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/pki"
+
+    elastic_version: "9.3.5"
+    elastic_repo_channel: "9.x"
+    elastic_version_lock: true
+
+    # There is no Elasticsearch in this scenario. The point of the test is that
+    # the pipeline Logstash 9 compiles is valid, which verify.yml checks with
+    # --config.test_and_exit; that does not require a reachable cluster.
+    logstash_elasticsearch_hosts:
+      - https://127.0.0.1:9200
+    logstash_elasticsearch_user: logstash_internal
+    logstash_elasticsearch_password: molecule-not-a-real-password
+    logstash_elasticsearch_ca_file: "{{ molecule_pki_dir }}/ca.crt"
+
+    # Exercises the TLS branch of the beats input template, which is where the
+    # settings that 7.0 made obsolete used to live.
+    logstash_ssl_certificate_file: "{{ molecule_pki_dir }}/beats.crt"
+    logstash_ssl_key_file: "{{ molecule_pki_dir }}/beats.key"
+
+    # Only plugins that ship inside the Logstash package, so the run does not
+    # depend on rubygems.org. The task still executes and must correctly skip
+    # each one as already present.
+    logstash_install_plugins:
+      - logstash-input-beats
+      - logstash-filter-translate
 
   pre_tasks:
-    - name: Update apt cache.
-      apt: update_cache=true cache_valid_time=600
-      when: ansible_os_family == 'Debian'
+    - name: Create a scratch PKI directory on the controller.
+      ansible.builtin.file:
+        path: "{{ molecule_pki_dir }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: false
+      run_once: true
 
-    - name: Use Java 8 on Debian/Ubuntu.
-      set_fact:
-        java_packages:
-          - openjdk-8-jdk
-      when: ansible_os_family == 'Debian'
+    # OpenSSL 3 writes the key as PKCS#8, which is what the beats input requires.
+    - name: Generate a throwaway CA and beats key pair on the controller.
+      ansible.builtin.command:
+        cmd: >-
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1
+          -subj /CN=molecule-{{ item }}
+          -keyout {{ molecule_pki_dir }}/{{ item }}.key
+          -out {{ molecule_pki_dir }}/{{ item }}.crt
+        creates: "{{ molecule_pki_dir }}/{{ item }}.crt"
+      loop:
+        - ca
+        - beats
+      delegate_to: localhost
+      become: false
+      run_once: true
 
+  # Referenced by its own directory rather than by name, so the scenario is
+  # self-contained in the role and does not depend on where the role sits in a
+  # wider repository.
   roles:
-    - geerlingguy.java
-    - geerlingguy.elasticsearch
-    - geerlingguy.logstash
+    - role: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"

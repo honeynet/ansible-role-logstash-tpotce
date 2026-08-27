@@ -1,13 +1,31 @@
 ---
-- name: Include OS Specific setup tasks
-  include: setup-{{ ansible_os_family }}.yml
+- name: Install Logstash
+  ansible.builtin.include_tasks: setup-Debian.yml
+  when: ansible_facts.os_family == 'Debian'
 
-- include: config.yml
-- include: ssl.yml
-- include: plugins.yml
+- name: Fail on unsupported platforms
+  ansible.builtin.fail:
+    msg: >-
+      This role only supports Debian-family hosts, but
+      {{ inventory_hostname }} reports os_family
+      "{{ ansible_facts.os_family }}".
+  when: ansible_facts.os_family != 'Debian'
+
+- name: Configure Logstash
+  ansible.builtin.include_tasks: config.yml
+
+- name: Install the T-Pot pipeline
+  ansible.builtin.include_tasks: pipeline.yml
+  when: logstash_manage_pipeline | bool
+
+- name: Install the beats SSL key pair
+  ansible.builtin.include_tasks: ssl.yml
+
+- name: Install the configured plugins
+  ansible.builtin.include_tasks: plugins.yml
 
 - name: Ensure Logstash is started and enabled on boot.
-  service:
+  ansible.builtin.service:
     name: logstash
-    state: started
+    state: "{{ logstash_service_state }}"
     enabled: "{{ logstash_enabled_on_boot }}"

@@ -1,108 +1,86 @@
 ---
-- name: Create Logstash inputs.
-  template:
-    src: "{{ item }}"
-    dest: /etc/logstash/conf.d/{{ item | basename | regex_replace('\.j2$', '') }}
+- name: Write the Logstash settings.
+  ansible.builtin.template:
+    src: logstash.yml.j2
+    dest: "{{ logstash_conf_dir }}/logstash.yml"
     owner: root
-    group: root
-    mode: 0644
-  with_fileglob:
-    - ../templates/inputs/*.j2
+    group: logstash
+    mode: '0640'
   notify: restart logstash
 
-- name: Create Logstash filters.
-  copy:
-    src: "files/filters/"
-    dest: "/etc/logstash/conf.d/"
+- name: Write the Logstash pipeline definitions.
+  ansible.builtin.template:
+    src: pipelines.yml.j2
+    dest: "{{ logstash_conf_dir }}/pipelines.yml"
     owner: root
-    group: root
-    mode: 0644
+    group: logstash
+    mode: '0640'
   notify: restart logstash
 
-- name: Find Logstah GeoLite2-City DB
-  find:
-    paths: "/usr/share/logstash/vendor/bundle/jruby/"
-    file_type: "file"
-    patterns: "GeoLite2-City.mmdb"
-    recurse: yes
-  register: find_GeoLite2_City_location
-
-- name: Find Logstah GeoLite2-ASN DB
-  find:
-    paths: "/usr/share/logstash/vendor/bundle/jruby/"
-    file_type: "file"
-    patterns: "GeoLite2-ASN.mmdb"
-    recurse: yes
-  register: find_GeoLite2_ASN_location
-
-- name: Set fact for GeoIP DB locations
-  set_fact:
-    GeoLite2_City_location: "{{ find_GeoLite2_City_location.files[0].path }}"
-    GeoLite2_ASN_location: "{{ find_GeoLite2_ASN_location.files[0].path }}"
-
-- name: Create GeoIP filter.
-  template:
-    src:  filters/198_geoipenrich.filter.conf.j2
-    dest: /etc/logstash/conf.d/198_geoipenrich.filter.conf
-    owner: root
-    group: root
-    mode: 0644
-  notify: restart logstash
-
-- name: Create Logstash output.
-  template:
-    src:  outputs/tpot.output.conf.j2
-    dest: /etc/logstash/conf.d/{{ item.id }}_{{ item.name }}.output.conf
-    owner: root
-    group: root
-    mode: 0644
-  with_items: "{{ index_list }}"
-  notify: restart logstash
-
-- name: Create ES index template.
-  copy:
-    src: es-templates/tpot_es_template.json
-    dest: /etc/logstash/tpot_es_template.json
-    owner: root
-    group: root
-    mode: 0644
-  notify: restart logstash
-
-- name: Make listbot directory.
-  file:
-    path: /etc/listbot
+- name: Ensure the Logstash certificate directory exists.
+  ansible.builtin.file:
+    path: "{{ logstash_certs_dir }}"
     state: directory
+    owner: root
+    group: logstash
+    mode: '0750'
 
-- name: Download listbot data.
-  get_url:
-    url: "{{ item }}"
-    dest: /tmp
-  with_items:
-    - https://listbot.sicherheitstacho.eu/cve.yaml.bz2
-    - https://listbot.sicherheitstacho.eu/iprep.yaml.bz2
-  changed_when: false
-
-- name: Extract listbot data.
-  shell: "bunzip2 -f *.bz2"
-  args:
-    chdir: /tmp
-  changed_when: false
-
-- name: Copy listbot data.
-  copy:
-    src: /tmp/{{ item }}
-    dest: /etc/listbot
-    remote_src: yes
-  with_items:
-    - cve.yaml
-    - iprep.yaml
+- name: Install the Elasticsearch CA certificate.
+  ansible.builtin.copy:
+    src: "{{ logstash_elasticsearch_ca_file }}"
+    dest: "{{ logstash_certs_dir }}/elasticsearch-ca.crt"
+    owner: root
+    group: logstash
+    mode: '0640'
+  when: logstash_elasticsearch_ca_file | length > 0
   notify: restart logstash
 
-- name: Cleanup listbot data in /tmp.
-  file:
-    path: /tmp/{{ item }}
-    state: absent
-  with_items:
-    - cve.yaml
-    - iprep.yaml
+# The Elasticsearch credentials live in the Logstash keystore rather than in a
+# pipeline file, so the password never lands in /etc/logstash/conf.d.
+- name: Ensure the Logstash keystore exists.
+  ansible.builtin.command:
+    cmd: "{{ logstash_dir }}/bin/logstash-keystore create --path.settings {{ logstash_conf_dir }}"
+    # Without a keystore password, create asks "Continue without password
+    # protection on the keystore? [y/N]" and fails on EOF. When
+    # logstash_keystore_password is set there is no prompt and this is ignored.
+    stdin: "y"
+    creates: "{{ logstash_conf_dir }}/logstash.keystore"
+  environment: "{{ logstash_keystore_env }}"
+
+- name: List the Logstash keystore entries.
+  ansible.builtin.command:
+    cmd: "{{ logstash_dir }}/bin/logstash-keystore list --path.settings {{ logstash_conf_dir }}"
+  register: logstash_keystore_entries
   changed_when: false
+  check_mode: false
+  environment: "{{ logstash_keystore_env }}"
+
+- name: Store the Elasticsearch credentials in the Logstash keystore.
+  ansible.builtin.command:
+    cmd: "{{ logstash_dir }}/bin/logstash-keystore add {{ item.key }} --stdin --path.settings {{ logstash_conf_dir }}"
+    stdin: "{{ item.value }}"
+    stdin_add_newline: false
+  loop:
+    - {key: ES_USER, value: "{{ logstash_elasticsearch_user }}"}
+    - {key: ES_PASSWORD, value: "{{ logstash_elasticsearch_password }}"}
+  loop_control:
+    label: "{{ item.key }}"
+  # logstash-keystore stores and lists identifiers lowercased, so ES_USER comes
+  # back as es_user. Comparing case-sensitively re-added both entries on every
+  # run. Lookups from the pipeline are lowercased the same way, so ${ES_USER}
+  # still resolves.
+  when: >-
+    (item.key | lower) not in (logstash_keystore_entries.stdout_lines
+                               | default([]) | map('trim') | map('lower') | list)
+    or (logstash_force_keystore_update | bool)
+  changed_when: true
+  no_log: true
+  environment: "{{ logstash_keystore_env }}"
+  notify: restart logstash
+
+- name: Ensure the Logstash keystore is readable by Logstash.
+  ansible.builtin.file:
+    path: "{{ logstash_conf_dir }}/logstash.keystore"
+    owner: root
+    group: logstash
+    mode: '0640'

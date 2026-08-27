@@ -3,28 +3,26 @@ dependencies: []
 
 galaxy_info:
   role_name: logstash
-  author: geerlingguy
-  description: Logstash for Linux.
-  company: "Midwestern Mac, LLC"
-  license: "license (BSD, MIT)"
-  min_ansible_version: 2.4
+  namespace: honeynet
+  author: The Honeynet Project
+  description: >-
+    Logstash 9.x with the T-Pot honeypot pipeline, shipping to an
+    authenticated, TLS-protected Elasticsearch cluster.
+  license: MIT
+  min_ansible_version: "2.15"
   platforms:
-    - name: EL
-      versions:
-        - 6
-        - 7
-        - 8
     - name: Debian
       versions:
-        - all
+        - trixie
+        - bookworm
     - name: Ubuntu
       versions:
         - all
   galaxy_tags:
-    - web
-    - system
+    - logstash
+    - elastic
+    - elk
     - monitoring
     - logging
     - logs
-    - elk
-    - logstash
+    - honeypot
