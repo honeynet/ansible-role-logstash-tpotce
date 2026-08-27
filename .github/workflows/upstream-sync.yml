@@ -25,21 +25,49 @@ jobs:
           repository: geerlingguy/ansible-role-logstash
           path: upstream
 
-      # handlers/main.yml, tasks/ssl.yml and tasks/plugins.yml are kept
-      # byte-for-byte identical to upstream (see README.md's Provenance
-      # section), so a straight diff is enough to know whether a sync is due.
-      - name: Compare the files carried verbatim from upstream
+      # tasks/ssl.yml and tasks/plugins.yml are kept byte-for-byte identical
+      # to upstream (see README.md's Provenance section), so it's safe to
+      # copy an upstream change straight in. handlers/main.yml takes its
+      # structure from upstream but has been adapted (ansible.builtin.systemd
+      # with daemon_reload instead of the free-form service: module), so an
+      # upstream change there is only ever flagged for a human to look at,
+      # never applied automatically.
+      - name: Compare tracked files against upstream
         id: diff
         working-directory: logstash
         run: |
+          set -euo pipefail
           changed=0
-          for f in handlers/main.yml tasks/ssl.yml tasks/plugins.yml; do
+          body_file="$RUNNER_TEMP/pr-body.md"
+          : > "$body_file"
+
+          for f in tasks/ssl.yml tasks/plugins.yml; do
             if ! diff -q "$f" "../upstream/$f" >/dev/null 2>&1; then
-              echo "Changed upstream: $f"
               changed=1
+              {
+                echo "### \`$f\` — applied (kept byte-for-byte identical to upstream)"
+                echo '```diff'
+                diff -u "$f" "../upstream/$f" || true
+                echo '```'
+                echo
+              } >> "$body_file"
               cp "../upstream/$f" "$f"
             fi
           done
+
+          for f in handlers/main.yml; do
+            if ! diff -q "$f" "../upstream/$f" >/dev/null 2>&1; then
+              changed=1
+              {
+                echo "### \`$f\` — NOT applied (this file has local changes; review manually)"
+                echo '```diff'
+                diff -u "$f" "../upstream/$f" || true
+                echo '```'
+                echo
+              } >> "$body_file"
+            fi
+          done
+
           echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
       - name: Open or update a PR with the upstream changes
@@ -48,16 +76,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           upstream_sha=$(git -C ../upstream rev-parse --short HEAD)
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b upstream-sync
-          git add handlers/main.yml tasks/ssl.yml tasks/plugins.yml
-          git commit -m "Sync verbatim upstream files from geerlingguy/ansible-role-logstash@${upstream_sha}"
+          git add -A
+          git commit -m "Upstream check: geerlingguy/ansible-role-logstash@${upstream_sha}" --allow-empty
           git push -u origin upstream-sync --force
           if ! gh pr list --head upstream-sync --state open --json number --jq '.[0]' | grep -q .; then
             gh pr create \
-              --title "Upstream sync: geerlingguy/ansible-role-logstash@${upstream_sha}" \
-              --body "handlers/main.yml, tasks/ssl.yml and/or tasks/plugins.yml changed upstream at geerlingguy/ansible-role-logstash@${upstream_sha}. These are meant to stay byte-for-byte identical to upstream (see README.md), so review the diff before merging in case the change needs adapting for this fork." \
+              --title "Upstream check: geerlingguy/ansible-role-logstash@${upstream_sha}" \
+              --body-file "$RUNNER_TEMP/pr-body.md" \
               --base master --head upstream-sync
+          else
+            gh pr edit upstream-sync --body-file "$RUNNER_TEMP/pr-body.md"
           fi
