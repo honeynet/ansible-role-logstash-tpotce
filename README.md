@@ -94,5 +94,33 @@ failure. The role now fails fast on a non-Debian `os_family`.
 
 ## Molecule
 
-The molecule scenario has been removed. It converged `geerlingguy.java` and
-`geerlingguy.elasticsearch`, neither of which this repository uses any more.
+`molecule test` converges the role on `geerlingguy/docker-debian13-ansible`,
+generates a throwaway CA and cluster credentials on the controller, and
+verifies the compiled pipeline, the keystore entries, the rendered output
+config and that Logstash starts clean. It replaces the old scenario, which
+converged `geerlingguy.java` and `geerlingguy.elasticsearch` — neither of
+which this role depends on any more.
+
+## Example Playbook
+
+    - hosts: logstash
+      roles:
+        - role: honeynet.logstash
+      vars:
+        elastic_version: "9.3.5"
+        elastic_repo_channel: "9.x"
+        logstash_elasticsearch_hosts:
+          - https://elasticsearch-01.example.org:9200
+        logstash_elasticsearch_ca_file: /etc/logstash/certs/ca.crt
+
+See `defaults/main.yml` for the full set of variables, and
+`molecule/default/converge.yml` for a complete working configuration.
+
+## License
+
+MIT
+
+## Author Information
+
+The Honeynet Project. Role scaffolding originally by
+[Jeff Geerling](https://github.com/geerlingguy).
