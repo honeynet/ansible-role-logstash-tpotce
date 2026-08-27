@@ -1,26 +1,79 @@
 ---
-logstash_version: '7.x'
+# Version and packaging ------------------------------------------------------
+elastic_version: "9.3.5"
+elastic_repo_channel: "9.x"
+elastic_version_lock: true
 
 logstash_package: logstash
+# The Logstash .deb carries epoch 1 and a package revision, unlike the
+# Elasticsearch and Kibana packages.
+logstash_package_version: "1:{{ elastic_version }}-1"
 
-logstash_listen_port_beats: 5044
+logstash_service_state: started
+logstash_enabled_on_boot: true
 
-logstash_elasticsearch_hosts:
-  - http://localhost:9200
-
-logstash_local_syslog_path: /var/log/syslog
-logstash_monitor_local_syslog: true
-
+# Paths ----------------------------------------------------------------------
 logstash_dir: /usr/share/logstash
+logstash_conf_dir: /etc/logstash
+logstash_pipeline_dir: /etc/logstash/conf.d
+logstash_certs_dir: /etc/logstash/certs
+
+# Beats input ----------------------------------------------------------------
+logstash_listen_port_beats: 5044
 
 logstash_ssl_dir: /etc/pki/logstash
 logstash_ssl_certificate_file: ""
 logstash_ssl_key_file: ""
 
-logstash_enabled_on_boot: true
+# Elasticsearch output -------------------------------------------------------
+logstash_elasticsearch_hosts:
+  - https://localhost:9200
+logstash_elasticsearch_user: logstash_internal
+logstash_elasticsearch_password: ""
+# Controller-side path to the cluster CA produced by the elasticsearch role.
+logstash_elasticsearch_ca_file: ""
+logstash_elasticsearch_ssl_verification_mode: full
+# Keystore entries are written once. Set this to true for one run after
+# rotating the Elasticsearch password.
+logstash_force_keystore_update: false
 
+# Optional password protecting the Logstash keystore itself. Leave empty to let
+# Logstash use its built-in obfuscation: an empty LOGSTASH_KEYSTORE_PASS is
+# rejected outright ("Empty keystore passwords are not allowed"), so the
+# variable is only exported when it actually has a value. If you set this, the
+# same value must reach the logstash service at runtime, e.g. through
+# /etc/default/logstash.
+logstash_keystore_password: ""
+
+# Pipeline -------------------------------------------------------------------
+logstash_manage_pipeline: true
+
+# Logstash 8.0 changed the default pipeline.ecs_compatibility from "disabled"
+# to "v8". The whole T-Pot filter set uses non-ECS field names (src_ip,
+# dest_port, ...), and T-Pot itself pins this to disabled in its pipelines.yml,
+# so this must stay disabled or every filter stops matching.
+logstash_ecs_compatibility: disabled
+
+logstash_pipeline_workers: ""
+logstash_pipeline_batch_size: 125
+
+# The geoip filter bundles Creative Commons GeoLite2 City and ASN databases and
+# manages updates itself. Set this to false on hosts without outbound access to
+# geoip.elastic.co; Logstash then keeps using the bundled CC databases forever.
+logstash_geoip_downloader_enabled: true
+
+# Listbot -------------------------------------------------------------------
+# CVE and IP reputation translation maps consumed by the suricata and geoip
+# enrichment filters.
+logstash_manage_listbot: true
+logstash_listbot_dir: /etc/listbot
+logstash_listbot_urls:
+  - https://listbot.sicherheitstacho.eu/cve.yaml.bz2
+  - https://listbot.sicherheitstacho.eu/iprep.yaml.bz2
+
+# Plugins --------------------------------------------------------------------
 logstash_install_plugins:
   - logstash-input-beats
   - logstash-filter-multiline
-
-logstash_setup_default_config: true
+  - logstash-filter-translate
+  - logstash-output-syslog

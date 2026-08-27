@@ -1,0 +1,20 @@
+{{ ansible_managed | comment }}
+# Events tagged as parse failures. Nothing tags "fails" by default - the
+# add_tag lines in 196_grokparsefailure and 197_jsonfailure are commented out
+# upstream, and those events are dropped instead. Uncomment them there to route
+# failures here rather than discarding them.
+output {
+  if "fails" in [tags] {
+    elasticsearch {
+      hosts => {{ logstash_elasticsearch_hosts | to_json }}
+      index => "fails-%{+YYYY.MM.dd}"
+      manage_template => false
+      ilm_enabled => false
+      user => "${ES_USER}"
+      password => "${ES_PASSWORD}"
+      ssl_enabled => true
+      ssl_verification_mode => "{{ logstash_elasticsearch_ssl_verification_mode }}"
+      ssl_certificate_authorities => ["{{ logstash_certs_dir }}/elasticsearch-ca.crt"]
+    }
+  }
+}

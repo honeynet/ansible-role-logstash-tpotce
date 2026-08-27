@@ -1,0 +1,185 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  gather_facts: false
+
+  # Pulls in index_list, so the assertions below track the role's own list
+  # rather than a copy that can drift.
+  vars_files:
+    - ../../vars/main.yml
+
+  vars:
+    logstash_dir: /usr/share/logstash
+    logstash_conf_dir: /etc/logstash
+    logstash_pipeline_dir: /etc/logstash/conf.d
+
+  tasks:
+    - name: Read the installed Logstash version.
+      ansible.builtin.command:
+        cmd: dpkg-query --showformat=${Version} --show logstash
+      register: logstash_version
+      changed_when: false
+
+    - name: The pinned version is installed and held.
+      ansible.builtin.assert:
+        that:
+          - logstash_version.stdout == '1:9.3.5-1'
+        fail_msg: "expected 1:9.3.5-1, got {{ logstash_version.stdout }}"
+
+    - name: Read the dpkg selection state.
+      ansible.builtin.command:
+        cmd: dpkg --get-selections logstash
+      register: logstash_selection
+      changed_when: false
+
+    - name: The package is held at the pinned version.
+      ansible.builtin.assert:
+        that:
+          - "'hold' in logstash_selection.stdout"
+
+    # This is the assertion that matters most. --config.test_and_exit compiles
+    # every file in conf.d and instantiates each plugin, so it fails on any
+    # option a 9.x plugin has removed or marked obsolete. It is what would have
+    # caught translate's field/destination, the beats input's ssl/ssl_verify_mode
+    # and the elasticsearch output's cacert.
+    - name: Create scratch data and log directories for the config test.
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: logstash
+        group: logstash
+        mode: '0750'
+      loop:
+        - /var/lib/logstash-configtest
+        - /var/log/logstash-configtest
+
+    # Runs as the logstash user because Logstash refuses to start as root, and
+    # against its own path.data and path.logs because the running service holds
+    # a lock on the real data directory and owns the real log files.
+    - name: Compile the whole pipeline with --config.test_and_exit.
+      ansible.builtin.command:
+        cmd: >-
+          {{ logstash_dir }}/bin/logstash --config.test_and_exit
+          --path.settings {{ logstash_conf_dir }}
+          --path.data /var/lib/logstash-configtest
+          --path.logs /var/log/logstash-configtest
+      become: true
+      become_user: logstash
+      register: logstash_config_test
+      changed_when: false
+      failed_when: false
+      timeout: 420
+
+    - name: The pipeline compiles cleanly.
+      ansible.builtin.assert:
+        that:
+          - logstash_config_test.rc == 0
+        fail_msg: |
+          Logstash rejected the pipeline (rc={{ logstash_config_test.rc }}):
+          {{ logstash_config_test.stdout }}
+          {{ logstash_config_test.stderr }}
+        success_msg: Logstash 9 compiled the T-Pot pipeline without errors.
+
+    - name: Collect the generated pipeline files.
+      ansible.builtin.find:
+        paths: "{{ logstash_pipeline_dir }}"
+        patterns: "*.conf"
+      register: logstash_pipeline_files
+
+    - name: Every honeypot in index_list produced an output, plus input and failure outputs.
+      ansible.builtin.assert:
+        that:
+          - names | select('search', '\\.output\\.conf$') | list | length == (index_list | length) + 1
+          - "'000_beats.input.conf' in names"
+          - "'299_fails.output.conf' in names"
+          - "'205_cowrie.output.conf' in names"
+          - "'236_nginx.output.conf' in names"
+          - "'198_geoipenrich.filter.conf' in names"
+        fail_msg: "unexpected pipeline contents: {{ names | sort }}"
+      vars:
+        names: "{{ logstash_pipeline_files.files | map(attribute='path') | map('basename') | list }}"
+
+    - name: Read the rendered beats input.
+      ansible.builtin.slurp:
+        src: "{{ logstash_pipeline_dir }}/000_beats.input.conf"
+      register: logstash_beats_input
+
+    - name: The beats input uses the current SSL option names.
+      ansible.builtin.assert:
+        that:
+          - "'ssl_enabled => true' in rendered"
+          - "'ssl_client_authentication' in rendered"
+          - "'ssl_verify_mode' not in rendered"
+        fail_msg: "beats input still carries obsolete SSL options:\n{{ rendered }}"
+      vars:
+        rendered: "{{ logstash_beats_input.content | b64decode }}"
+
+    - name: Read a rendered Elasticsearch output.
+      ansible.builtin.slurp:
+        src: "{{ logstash_pipeline_dir }}/205_cowrie.output.conf"
+      register: logstash_cowrie_output
+
+    - name: The output references the keystore rather than embedding a password.
+      ansible.builtin.assert:
+        that:
+          - "'${ES_PASSWORD}' in rendered"
+          - "'molecule-not-a-real-password' not in rendered"
+          - "'manage_template => false' in rendered"
+          - "'cacert =>' not in rendered"
+        fail_msg: "unexpected output contents:\n{{ rendered }}"
+      vars:
+        rendered: "{{ logstash_cowrie_output.content | b64decode }}"
+
+    - name: Read the Logstash keystore entries.
+      ansible.builtin.command:
+        cmd: "{{ logstash_dir }}/bin/logstash-keystore list --path.settings {{ logstash_conf_dir }}"
+      register: logstash_keystore
+      changed_when: false
+
+    # logstash-keystore lists identifiers lowercased.
+    - name: The Elasticsearch credentials are in the keystore.
+      ansible.builtin.assert:
+        that:
+          - "'es_user' in entries"
+          - "'es_password' in entries"
+        fail_msg: "keystore holds: {{ entries }}"
+      vars:
+        entries: "{{ logstash_keystore.stdout_lines | map('trim') | map('lower') | list }}"
+
+    - name: Read the Logstash settings.
+      ansible.builtin.slurp:
+        src: "{{ logstash_conf_dir }}/logstash.yml"
+      register: logstash_settings
+
+    - name: ECS compatibility is pinned to disabled.
+      ansible.builtin.assert:
+        that:
+          - (logstash_settings.content | b64decode | from_yaml)['pipeline.ecs_compatibility'] == 'disabled'
+
+    - name: Check the listbot translation maps.
+      ansible.builtin.stat:
+        path: "/etc/listbot/{{ item }}"
+      register: logstash_listbot_files
+      loop:
+        - cve.yaml
+        - iprep.yaml
+
+    - name: The translation maps the translate filters depend on exist.
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.size > 0
+        fail_msg: "{{ item.item }} missing or empty"
+      loop: "{{ logstash_listbot_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Read the service state.
+      ansible.builtin.service_facts:
+
+    - name: Logstash is enabled and running.
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services['logstash.service'].state == 'running'
+          - ansible_facts.services['logstash.service'].status == 'enabled'

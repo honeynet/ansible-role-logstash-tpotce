@@ -1,0 +1,100 @@
+---
+# One Elasticsearch output per honeypot, rendered from
+# templates/outputs/tpot.output.conf.j2. "name" is matched against the tag
+# filebeat puts on the event and is also the index suffix, so
+# logstash-<name>-YYYY.MM.dd. "id" only orders the generated file in conf.d.
+#
+# Tags follow T-Pot's log type names lowercased (T-Pot "CitrixHoneypot" ->
+# "citrixhoneypot"). Check these against the filebeat configuration on the
+# sensors before relying on the newer entries.
+index_list:
+  # Present since this repository forked from T-Pot.
+  - name: suricata
+    id: 200
+  - name: p0f
+    id: 201
+  - name: adbhoney
+    id: 202
+  - name: ciscoasa
+    id: 203
+  - name: conpot
+    id: 204
+  - name: cowrie
+    id: 205
+  - name: dionaea
+    id: 206
+  - name: elasticpot
+    id: 207
+  - name: glutton
+    id: 208
+  - name: heralding
+    id: 209
+  - name: mailoney
+    id: 210
+  - name: medpot
+    id: 211
+  - name: rdpy
+    id: 212
+  - name: tanner
+    id: 213
+  - name: honeypy
+    id: 214
+  - name: fatt
+    id: 215
+  - name: honeytrap
+    id: 216
+  - name: citrixhoneypot
+    id: 217
+  - name: dicompot
+    id: 218
+  - name: honeysap
+    id: 219
+  - name: ipphoney
+    id: 220
+  - name: log4pot
+    id: 221
+  # Added upstream in T-Pot since the fork.
+  - name: beelzebub
+    id: 222
+  - name: ddospot
+    id: 223
+  - name: endlessh
+    id: 224
+  - name: galah
+    id: 225
+  - name: go-pot
+    id: 226
+  - name: h0neytr4p
+    id: 227
+  - name: hellpot
+    id: 228
+  - name: honeyaml
+    id: 229
+  - name: honeypots
+    id: 230
+  - name: miniprint
+    id: 231
+  - name: rdphoneypot
+    id: 232
+  - name: redishoneypot
+    id: 233
+  - name: sentrypeer
+    id: 234
+  - name: wordpot
+    id: 235
+  - name: nginx
+    id: 236
+
+# Pipeline fragments written by earlier revisions of this role. conf.d is
+# globbed, so anything stale left behind is still loaded by Logstash.
+logstash_retired_pipeline_files:
+  - 01-beats-input.conf
+  - 02-local-syslog-input.conf
+  - 10-syslog.conf
+  - 30-elasticsearch-output.conf
+
+# Only export LOGSTASH_KEYSTORE_PASS when a password is actually configured;
+# exporting it empty makes logstash-keystore refuse to run.
+logstash_keystore_env: >-
+  {{ {'LOGSTASH_KEYSTORE_PASS': logstash_keystore_password}
+     if (logstash_keystore_password | length > 0) else {} }}

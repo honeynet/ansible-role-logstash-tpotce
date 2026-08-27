@@ -1,0 +1,54 @@
+---
+- name: Create Logstash inputs.
+  ansible.builtin.template:
+    src: "{{ item }}"
+    dest: "{{ logstash_pipeline_dir }}/{{ item | basename | regex_replace('\\.j2$', '') }}"
+    owner: root
+    group: logstash
+    mode: '0640'
+  with_fileglob:
+    - ../templates/inputs/*.j2
+  notify: restart logstash
+
+- name: Create Logstash filters.
+  ansible.builtin.copy:
+    src: files/filters/
+    dest: "{{ logstash_pipeline_dir }}/"
+    owner: root
+    group: logstash
+    mode: '0640'
+  notify: restart logstash
+
+- name: Create the per-honeypot Elasticsearch outputs.
+  ansible.builtin.template:
+    src: outputs/tpot.output.conf.j2
+    dest: "{{ logstash_pipeline_dir }}/{{ item.id }}_{{ item.name }}.output.conf"
+    owner: root
+    group: logstash
+    mode: '0640'
+  loop: "{{ index_list }}"
+  loop_control:
+    label: "{{ item.id }}_{{ item.name }}"
+  notify: restart logstash
+
+- name: Create the parse-failure output.
+  ansible.builtin.template:
+    src: outputs/299_fails.output.conf.j2
+    dest: "{{ logstash_pipeline_dir }}/299_fails.output.conf"
+    owner: root
+    group: logstash
+    mode: '0640'
+  notify: restart logstash
+
+# Files left over from an earlier revision of this role. conf.d is a glob, so
+# anything stale here is still loaded into the pipeline.
+- name: Remove retired pipeline fragments.
+  ansible.builtin.file:
+    path: "{{ logstash_pipeline_dir }}/{{ item }}"
+    state: absent
+  loop: "{{ logstash_retired_pipeline_files }}"
+  notify: restart logstash
+
+- name: Install the listbot translation maps
+  ansible.builtin.include_tasks: listbot.yml
+  when: logstash_manage_listbot | bool
