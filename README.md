@@ -1,100 +1,98 @@
 # Ansible Role: Logstash
 
-[![Build Status](https://travis-ci.org/geerlingguy/ansible-role-logstash.svg?branch=master)](https://travis-ci.org/geerlingguy/ansible-role-logstash)
+Logstash 9.x running the T-Pot honeypot pipeline, shipping to an authenticated,
+TLS-protected Elasticsearch cluster.
 
-An Ansible Role that installs Logstash on RedHat/CentOS Debian/Ubuntu.
+## Provenance
 
-Note that this role installs a syslog grok pattern by default; if you want to add more filters, please add them inside the `/etc/logstash/conf.d/` directory. As an example, you could create a file named `13-myapp.conf` with the appropriate grok filter and restart logstash to start using it. Test your grok regex using the [Grok Debugger](http://grokdebug.herokuapp.com/).
+This role is a fork with two upstreams, and syncs should be taken from both:
 
-## Requirements
+| Part | Upstream | Synced at |
+| --- | --- | --- |
+| Role scaffolding (`handlers/`, `tasks/ssl.yml`, `tasks/plugins.yml`) | [geerlingguy/ansible-role-logstash](https://github.com/geerlingguy/ansible-role-logstash) | `c8aaeb69` |
+| Pipeline configuration (`files/filters/`, `templates/outputs/`) | [telekom-security/tpotce](https://github.com/telekom-security/tpotce), `docker/elk/logstash/dist/` | `8a228130` |
 
-Though other methods are possible, this role is made to work with Elasticsearch as a backend for storing log messages.
+Files taken verbatim from geerlingguy are left formatted as upstream has them
+(short-form module calls, unqualified names) so that the next sync stays a clean
+diff. The repository `.ansible-lint` skips the rules that would otherwise
+object.
 
-## Role Variables
+## How this diverges from T-Pot
 
-Available variables are listed below, along with default values (see `defaults/main.yml`):
+T-Pot runs one monolithic `logstash.conf` keyed on `[type]`, tails honeypot logs
+off local disk with `file` inputs, and writes everything into a single
+`logstash-YYYY.MM.dd` index.
 
-    logstash_version: '7.x'
+This deployment is a *hive*: sensors ship over **beats** on 5044, events carry
+lowercase **tags** rather than a `[type]`, and each honeypot gets its own index
+(`logstash-cowrie-2026.08.24`). That split is driven by `index_list` in
+`vars/main.yml`, rendered through `templates/outputs/tpot.output.conf.j2`.
 
-The major version of Logstash to install.
+Both divergences predate this sync and are preserved deliberately — changing
+either would invalidate the existing Kibana saved objects.
 
-    logstash_listen_port_beats: 5044
+## Changes required for 9.x
 
-The port over which Logstash will listen for beats.
+These were hard breaks, not deprecations:
 
-    logstash_elasticsearch_hosts:
-      - http://localhost:9200
+* **`logstash-filter-translate`** renamed `field` → `source` and `destination`
+  → `target` in 4.0. The old names are removed. Affected
+  `100_suricata.filter.conf` and the GeoIP enrichment filter.
+* **`logstash-input-beats` 7.0** made `ssl` and `ssl_verify_mode` obsolete;
+  they are now `ssl_enabled` and `ssl_client_authentication`. An obsolete
+  setting fails the pipeline at startup rather than warning.
+* **`logstash-output-elasticsearch` 12.0** made `cacert`, `ssl` and
+  `ssl_certificate_verification` obsolete, in favour of
+  `ssl_certificate_authorities`, `ssl_enabled` and `ssl_verification_mode`.
+* **`pipeline.ecs_compatibility`** defaulted to `disabled` up to 7.x and to
+  `v8` from 8.0. The entire T-Pot filter set uses non-ECS field names
+  (`src_ip`, `dest_port`), so this role pins it back to `disabled` in both
+  `logstash.yml` and `pipelines.yml`, exactly as T-Pot does.
+* **GeoIP databases** no longer live under
+  `/usr/share/logstash/vendor/bundle/jruby/`. 8.x moved them into the GeoIP
+  database management service. The old role searched that path with `find` and
+  fed `files[0].path` into `set_fact`, which on 9.x fails on an empty list. The
+  filter now uses `default_database_type => "City"` / `"ASN"` against the
+  bundled Creative Commons databases, matching T-Pot.
 
-The hosts where Logstash should ship logs to Elasticsearch.
+## Honeypot coverage
 
-    logstash_dir: /usr/share/logstash
+The filter set was brought up to what T-Pot emits today. Added: `beelzebub`,
+`ddospot`, `endlessh`, `galah`, `go-pot`, `h0neytr4p`, `hellpot`, `honeyaml`,
+`honeypots`, `miniprint`, `nginx`, `rdphoneypot`, `redishoneypot`,
+`sentrypeer`, `wordpot`.
 
-The directory inside which Logstash is installed.
+Kept, although T-Pot has since dropped them, because sensors running older
+T-Pot releases may still send them: `honeypy`, `honeysap`, `rdpy`.
 
-    logstash_ssl_dir: /etc/pki/logstash
-    logstash_ssl_certificate_file: logstash-forwarder-example.crt
-    logstash_ssl_key_file: logstash-forwarder-example.key
+> The tag names for the newly added honeypots follow this repository's existing
+> convention — T-Pot's log type name, lowercased. **Check them against the
+> filebeat configuration on your sensors.** A filter whose tag never matches is
+> inert rather than harmful, but it also does nothing.
 
-Local paths to the SSL certificate and key files, which will be copied into the `logstash_ssl_dir`.
+## Credentials
 
-See [Generating a self-signed certificate](#generating-a-self-signed-certificate) for information about generating and using self-signed certs with Logstash and Filebeat.
+The Elasticsearch username and password go into the **Logstash keystore** as
+`ES_USER` and `ES_PASSWORD`, referenced from the output configuration, so no
+credential is written into `/etc/logstash/conf.d`. Keystore entries are only
+written when absent; after rotating the password, run once with
+`-e logstash_force_keystore_update=true`.
 
-    logstash_local_syslog_path: /var/log/syslog
-    logstash_monitor_local_syslog: true
+## Listbot
 
-Whether configuration for local syslog file (defined as `logstash_local_syslog_path`) should be added to logstash. Set this to `false` if you are monitoring the local syslog differently, or if you don't care about the local syslog file. Other local logs can be added by your own configuration files placed inside `/etc/logstash/conf.d`.
+`logstash_manage_listbot` downloads the CVE and IP reputation translation maps
+from `listbot.sicherheitstacho.eu` into `/etc/listbot`. These feed the
+`translate` filters in `100_suricata` and `198_geoipenrich`. Set it to `false`
+if that host is unreachable; the filters then simply do not enrich.
 
-    logstash_enabled_on_boot: true
+## Debian only
 
-Set this to `false` if you don't want logstash to run on system startup.
+`tasks/setup-RedHat.yml` and `templates/logstash.repo.j2` have been dropped.
+The deployment targets Debian 13, the version pinning and repository handling
+are Debian-specific, and an untested RedHat path is worse than an explicit
+failure. The role now fails fast on a non-Debian `os_family`.
 
-    logstash_install_plugins:
-      - logstash-input-beats
-      - logstash-filter-multiline
+## Molecule
 
-A list of Logstash plugins that should be installed.
-
-## Generating a Self-signed certificate
-
-For utmost security, you should use your own valid certificate and keyfile, and update the `logstash_ssl_*` variables in your playbook to use your certificate.
-
-To generate a self-signed certificate/key pair, you can use use the command:
-
-    $ openssl req -x509 -batch -nodes -days 3650 -newkey rsa:2048 -keyout logstash.key -out logstash.crt -subj '/CN=example.com'
-
-Note that Filebeat and Logstash may not work correctly with self-signed certificates unless you also have the full chain of trust (including the Certificate Authority for your self-signed cert) added on your server. See: https://github.com/elastic/logstash/issues/4926#issuecomment-203936891
-
-Newer versions of Filebeat and Logstash also require a pkcs8-formatted private key, which can be generated by converting the key generated earlier, e.g.:
-
-    openssl pkcs8 -in logstash.key -topk8 -nocrypt -out logstash.p8
-
-## Other Notes
-
-If you are seeing high CPU usage from one of the `logstash` processes, and you're using Logstash along with another application running on port 80 on a platform like Ubuntu with upstart, the `logstash-web` process may be stuck in a loop trying to start on port 80, failing, and trying to start again, due to the `restart` flag being present in `/etc/init/logstash-web.conf`. To avoid this problem, either change that line to add a `limit` to the respawn statement, or set the `logstash-web` service to `enabled=no` in your playbook, e.g.:
-
-    - name: Ensure logstash-web process is stopped and disabled.
-      service: name=logstash-web state=stopped enabled=no
-
-## Example Playbook
-
-    - hosts: search
-    
-      pre_tasks:
-        - name: Use Java 8 on Debian/Ubuntu.
-          set_fact:
-            java_packages:
-              - openjdk-8-jdk
-          when: ansible_os_family == 'Debian'
-    
-      roles:
-        - geerlingguy.java
-        - geerlingguy.elasticsearch
-        - geerlingguy.logstash
-
-## License
-
-MIT / BSD
-
-## Author Information
-
-This role was created in 2014 by [Jeff Geerling](https://www.jeffgeerling.com/), author of [Ansible for DevOps](https://www.ansiblefordevops.com/).
+The molecule scenario has been removed. It converged `geerlingguy.java` and
+`geerlingguy.elasticsearch`, neither of which this repository uses any more.
