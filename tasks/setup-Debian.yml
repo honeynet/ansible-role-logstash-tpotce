@@ -1,29 +1,95 @@
 ---
 - name: Ensure required dependencies are installed.
-  apt:
+  ansible.builtin.apt:
     name:
       - apt-transport-https
-      - gnupg2
-    state: present
-
-- name: Add Elasticsearch apt key.
-  apt_key:
-    url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
-    state: present
-
-- name: Add Logstash repository.
-  apt_repository:
-    repo: 'deb https://artifacts.elastic.co/packages/{{ logstash_version }}/apt stable main'
+      - bzip2
+      - ca-certificates
+      - gnupg
+      - python3-debian
     state: present
     update_cache: true
+    cache_valid_time: 3600
 
-- name: Install Logstash.
-  apt:
-    name: '{{ logstash_package }}'
+- name: Ensure the apt keyring directory exists.
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+# apt_key is deprecated and the trusted.gpg keyring is ignored on Debian 13, so
+# the key is dropped into /etc/apt/keyrings and referenced by signed-by.
+- name: Add the Elastic package signing key.
+  ansible.builtin.get_url:
+    url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+    dest: /etc/apt/keyrings/elastic.asc
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Add the Elastic apt repository for channel {{ elastic_repo_channel }}
+  ansible.builtin.deb822_repository:
+    name: elastic-{{ elastic_repo_channel }}
+    types: [deb]
+    uris: "https://artifacts.elastic.co/packages/{{ elastic_repo_channel }}/apt"
+    suites: [stable]
+    components: [main]
+    signed_by: /etc/apt/keyrings/elastic.asc
+    enabled: true
     state: present
+  register: logstash_repository
+
+- name: Drop the one-line Elastic repository definitions from older runs.
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/artifacts_elastic_co_packages_7_x_apt.list
+    - /etc/apt/sources.list.d/artifacts_elastic_co_packages_8_x_apt.list
+  register: logstash_legacy_repository
+
+- name: Refresh the apt cache after a repository change.
+  ansible.builtin.apt:
+    update_cache: true
+  when: logstash_repository.changed or logstash_legacy_repository.changed
+
+- name: Determine the currently installed Logstash version.
+  ansible.builtin.command:
+    cmd: dpkg-query --showformat=${Version} --show {{ logstash_package }}
+  register: logstash_installed_version
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Release the Logstash version hold.
+  ansible.builtin.dpkg_selections:
+    name: "{{ logstash_package }}"
+    selection: install
+  # dpkg only knows a package it has seen before, so on a first install there is
+  # no selection to release and the module would fail outright.
+  when:
+    - logstash_installed_version.rc == 0
+    - >-
+      not (elastic_version_lock | bool)
+      or logstash_installed_version.stdout != logstash_package_version
+
+- name: Install Logstash version {{ logstash_package_version }}
+  ansible.builtin.apt:
+    name: "{{ logstash_package }}={{ logstash_package_version }}"
+    state: present
+    allow_downgrade: true
+  notify: restart logstash
+
+- name: Hold the Logstash package at version {{ logstash_package_version }}
+  ansible.builtin.dpkg_selections:
+    name: "{{ logstash_package }}"
+    selection: hold
+  when: elastic_version_lock | bool
 
 - name: Add Logstash user to adm group (Debian).
-  user:
+  ansible.builtin.user:
     name: logstash
     group: logstash
     groups: adm

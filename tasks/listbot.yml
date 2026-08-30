@@ -1,0 +1,60 @@
+---
+# CVE and IP reputation maps consumed by the suricata and geoip enrichment
+# filters through logstash-filter-translate.
+
+- name: Ensure the listbot staging directory exists.
+  ansible.builtin.file:
+    path: /var/cache/listbot
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Ensure the listbot directory exists.
+  ansible.builtin.file:
+    path: "{{ logstash_listbot_dir }}"
+    state: directory
+    owner: root
+    group: logstash
+    mode: '0750'
+
+- name: Download the listbot translation maps.
+  ansible.builtin.get_url:
+    url: "{{ item }}"
+    dest: "/var/cache/listbot/{{ item | basename }}"
+    owner: root
+    group: root
+    mode: '0640'
+  loop: "{{ logstash_listbot_urls }}"
+  register: logstash_listbot_download
+  until: logstash_listbot_download is succeeded
+  retries: 3
+  delay: 5
+
+- name: Check which translation maps are already unpacked.
+  ansible.builtin.stat:
+    path: "{{ logstash_listbot_dir }}/{{ item | basename | regex_replace('\\.bz2$', '') }}"
+  loop: "{{ logstash_listbot_urls }}"
+  register: logstash_listbot_unpacked
+
+- name: Unpack the listbot translation maps.
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      bunzip2 --keep --stdout {{ item.0.dest | quote }}
+      > {{ (logstash_listbot_dir ~ '/' ~ (item.0.dest | basename | regex_replace('\.bz2$', ''))) | quote }}
+    executable: /bin/bash
+  loop: "{{ logstash_listbot_download.results | zip(logstash_listbot_unpacked.results) | list }}"
+  loop_control:
+    label: "{{ item.0.dest | basename }}"
+  when: item.0 is changed or not item.1.stat.exists
+  changed_when: true
+  notify: restart logstash
+
+- name: Ensure the translation maps are readable by Logstash.
+  ansible.builtin.file:
+    path: "{{ logstash_listbot_dir }}/{{ item | basename | regex_replace('\\.bz2$', '') }}"
+    owner: root
+    group: logstash
+    mode: '0640'
+  loop: "{{ logstash_listbot_urls }}"

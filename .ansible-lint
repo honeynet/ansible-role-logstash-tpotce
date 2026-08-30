@@ -1,3 +1,21 @@
+---
+profile: basic
+
 skip_list:
-  - 'yaml'
-  - 'role-name'
+  # elastic_version, elastic_repo_channel and elastic_version_lock are shared
+  # deliberately with the honeynet.elasticsearch and honeynet.kibana roles so
+  # that one variable pins the whole stack. index_list is this role's existing
+  # public interface for the per-honeypot outputs. Neither can carry a role
+  # prefix.
+  - var-naming[no-role-prefix]
+  # tasks/ssl.yml and tasks/plugins.yml are carried verbatim from the
+  # geerlingguy/ansible-role-logstash upstream so that future syncs stay a
+  # clean diff. Reformatting them here would make every sync a merge
+  # conflict.
+  - fqcn[action-core]
+  - no-free-form
+  - yaml[octal-values]
+  # handlers/main.yml keeps upstream's lowercase task-name style even though
+  # the module call itself has been modernized (ansible.builtin.systemd
+  # instead of the free-form service:). See README.md's Provenance section.
+  - name[casing]

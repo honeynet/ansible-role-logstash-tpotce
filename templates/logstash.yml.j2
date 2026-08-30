@@ -1,0 +1,18 @@
+{{ ansible_managed | comment }}
+path.data: /var/lib/logstash
+path.logs: /var/log/logstash
+
+# Logstash 8.0 flipped this default from "disabled" to "v8". The T-Pot filter
+# set is written against non-ECS field names, so it has to stay disabled.
+pipeline.ecs_compatibility: {{ logstash_ecs_compatibility }}
+pipeline.batch.size: {{ logstash_pipeline_batch_size }}
+{% if logstash_pipeline_workers | string | length > 0 %}
+pipeline.workers: {{ logstash_pipeline_workers }}
+{% endif %}
+
+# When enabled, Logstash keeps the MaxMind GeoLite2 databases up to date from
+# geoip.elastic.co. When disabled it uses the bundled Creative Commons
+# databases indefinitely, which is what air-gapped hosts want.
+xpack.geoip.downloader.enabled: {{ logstash_geoip_downloader_enabled | bool | lower }}
+
+api.http.host: 127.0.0.1
